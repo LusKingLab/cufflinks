@@ -253,6 +253,56 @@ vector<vector<boost::shared_ptr<SampleAbundances> > > TestLauncher::test_finishe
 //    }
 }
 
+//new function to adjust locus tag for a gene with non overlapping transcripts
+int expand_locus_tag(string &locus_tag, string expand)
+{
+	size_t pos1,pos2,len1,len2,p;
+	int rc=0;
+
+	//check that chromosome is same in both locus_tags
+	len1=expand.find(':');
+	if (len1 == expand.npos) return -1;
+	if (locus_tag.compare(0,len1, expand,0,len1) != 0) return -1;
+
+	//check start position
+	pos1=len1+1;
+	pos2=pos1;
+
+ 	p=locus_tag.find('-');
+	if (p == locus_tag.npos) return -1;
+	len1 = p-pos1;
+	
+	p=expand.find('-');
+	if (p == expand.npos) return -1;
+	len2 = p-pos2;
+
+	//lens same - do string compare 
+	//	=0 : same sposition 				- do nothing
+	//	<0 : locus1' sposition < locus2' 		- do nothing
+	//	>0 : locus1' sposition > locus2' 		- replace
+	//len1 < len2 : locus1 sposition is < locus2' sposition - do nothing
+	//len1 > len2 : locus1' sposition > locus2' sposition 	- replace
+	if ((len1>len2) || ( (len1==len2) && (locus_tag.compare(pos1,len1,expand,pos2,len2) >0))) //replace
+	{ 
+		locus_tag.replace(pos1,len1,expand,pos2,len2);
+		len1=len2;
+		rc+=1;	
+	} 
+		//check end position
+	pos1 += len1+1;
+	pos2 += len2+1;
+	len1 = locus_tag.npos-pos1;
+	len2 = expand.npos-pos2;
+	if ((len1<len2) || ( (len1==len2) && (locus_tag.compare(pos1,len1,expand,pos2,len2) <0))) //replace
+	{ 
+		locus_tag.replace(pos1,len1,expand,pos2,len2);
+		len1=len2;
+		rc+=10;	
+	} 
+
+	return rc;
+}
+
 //// Sampling-based test:
 SampleDifference test_diffexp(const FPKMContext& curr,
                               const FPKMContext& prev)
@@ -336,8 +386,8 @@ SampleDifference test_diffexp(const FPKMContext& curr,
         else
             test.test_stat = 0;
 
-        
-        test.test_stat = numerator / denominator;
+        //this undid all the checks above
+	// test.test_stat = numerator / denominator;
         
         
         // Draw from prev fpkm_samples to make the first half of the null
@@ -1369,13 +1419,39 @@ void test_differential(const string& locus_tag,
                                                                   test));
             
             boost::shared_ptr<SampleDifferenceMetaData> meta_data = get_metadata(desc);
-            
-            meta_data->gene_ids = curr_abundance.gene_id();
-            meta_data->gene_names = curr_abundance.gene_name();
-            meta_data->protein_ids = curr_abundance.protein_id();
-            meta_data->locus_desc = curr_abundance.locus_tag();
-            meta_data->description = curr_abundance.description();
-            inserted.first->second.meta_data = meta_data;
+
+	    // if insert fails, the test data is not inserted but the metadata was saved/changed
+	    // so locus info is not where the info is really from
+	    if (inserted.second) { 
+		meta_data->gene_ids = curr_abundance.gene_id();
+		meta_data->gene_names = curr_abundance.gene_name();
+		meta_data->protein_ids = curr_abundance.protein_id();
+		meta_data->locus_desc = curr_abundance.locus_tag();
+		meta_data->description = curr_abundance.description();
+
+		inserted.first->second.meta_data = meta_data;
+	    } else { 
+		//make sure not to loose good data
+		if ( (test.test_status == OK) || (tests.gene_de_tests[i][j][desc].test_status != OK) )
+			//replace test info
+			tests.gene_de_tests[i][j][desc]=test;
+
+		//add to meta_data instead of replacing
+		set<string> gene_ids = curr_abundance.gene_id();
+		set<string> genes = curr_abundance.gene_name();
+		set<string> proteins = curr_abundance.protein_id();
+
+		meta_data->gene_ids.insert(gene_ids.begin(), gene_ids.end());
+		meta_data->gene_names.insert(genes.begin(), genes.end());
+		meta_data->protein_ids.insert(proteins.begin(), proteins.end());
+
+		//new function
+		expand_locus_tag(meta_data->locus_desc,curr_abundance.locus_tag());
+		meta_data->description =curr_abundance.description();
+
+		tests.gene_de_tests[i][j][desc].meta_data = meta_data;
+	    }
+
 #if ENABLE_THREADS
             test_storage_lock.unlock();
 #endif
