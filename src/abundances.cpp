@@ -1089,9 +1089,11 @@ void AbundanceGroup::calculate_locus_scaled_mass_and_variance(const vector<boost
         boost::shared_ptr<MassDispersionModel const> disperser = rg_props->mass_dispersion_model();
         for (size_t j = 0; j < N; ++j)
         {
-            double scaled_variance;
-            //scaled_variance = disperser->scale_mass_variance(scaled_mass * _abundances[j]->gamma());
-            scaled_variance = _abundances[j]->gamma() * disperser->scale_mass_variance(scaled_mass);
+            double scaled_variance;	
+            scaled_variance = disperser->scale_mass_variance(scaled_mass * _abundances[j]->gamma());
+	    // doesn't work in cases where many transcripts of different sizes grouped in same locus
+	    // can't use same gamma as mass for variance
+            //scaled_variance = _abundances[j]->gamma() * disperser->scale_mass_variance(scaled_mass);
             avg_mass_variances[j] += scaled_variance;
         }
         assert (disperser->scale_mass_variance(scaled_mass) != 0 || scaled_mass == 0); 
@@ -1828,14 +1830,20 @@ void AbundanceGroup::calculate_abundance_for_replicate(const vector<MateHit>& al
         _abundances[i]->num_fragment_uncertainty_var(_iterated_exp_count_covariance(i,i));
     }
     
-    if (corr_multi && !final_est_run)
-    {
-        update_multi_reads(alignments, mapped_transcripts);
-    }
+    //FPKM isnt set yet so this will always fail. Move to after calculate_locus_scaled_mass_and_variance
+    //if (corr_multi && !final_est_run)
+    //{
+    //    update_multi_reads(alignments, mapped_transcripts);
+    //}
     
     // Calculate the initial estimates for the number of fragments originating
     // from each transcript, the FPKMs, and set the NB variances
     calculate_locus_scaled_mass_and_variance(transcripts);
+	
+    if (corr_multi && !final_est_run)
+    {
+        update_multi_reads(alignments, mapped_transcripts);
+    }
 }
 
 void AbundanceGroup::aggregate_replicate_abundances(const map<boost::shared_ptr<ReadGroupProperties const >, boost::shared_ptr<const AbundanceGroup> >& ab_group_per_replicate)
@@ -2287,14 +2295,17 @@ bool simulate_count_covariance(const vector<double>& num_fragments,
                 if (r > 0)
                 {
                     //double fit_var = _abundances[j]->mass_variance();
-                    
-                    double fit_var = total_var * (random_count_assign(j) / total_frag_counts);
+                    // doesn't work in cases where many transcripts of different sizes grouped in same locus
+	            // can't use same gamma as mass for variance
+                    //double fit_var = total_var * (random_count_assign(j) / total_frag_counts);
+		    double fit_var = frag_variances[j] * (random_count_assign(j) / num_fragments[j]);
                     double frags = random_count_assign(j);
                     
-                    if (fit_var - frags > 1e-1)
+		    // frags might be larger than fit_var
+                    if (fabs(fit_var - frags) > 1e-1)
                     {
                         r *= r;
-                        double over_disp_scale = fit_var - frags;
+                        double over_disp_scale = fabs(fit_var - frags);
                         r /= over_disp_scale;
                         
                         double after_decimal = r - (long)r;
@@ -2582,7 +2593,9 @@ void AbundanceGroup::calculate_FPKM_covariance()
             long double length_j = _abundances[j]->effective_length();
             assert (!isinf(length_i) && !isnan(length_i));
             assert (!isinf(length_j) && !isnan(length_j));
-            if (length_i > 0 && length_j > 0 & M > 0)
+	    //typo
+	    //if (length_i > 0 && length_j > 0 & M > 0)
+            if (length_i > 0 && length_j > 0 && M > 0)
             {
                 _fpkm_covariance(i,j) *=
                     ((1000000000.0 / (length_j *M)))*((1000000000.0 / (length_i *M)));
@@ -2722,8 +2735,10 @@ void AbundanceGroup::calculate_conf_intervals()
             for (size_t j = 0; j < N; ++j)
             {
                 double scaled_variance;
-                //scaled_variance = disperser->scale_mass_variance(scaled_mass * _abundances[j]->gamma());
-                scaled_variance = _abundances[j]->gamma() * disperser->scale_mass_variance(scaled_mass);
+                scaled_variance = disperser->scale_mass_variance(scaled_mass * _abundances[j]->gamma());
+		// doesn't work in cases where many transcripts of different sizes grouped in same locus
+	        // can't use same gamma as mass for variance
+                // scaled_variance = _abundances[j]->gamma() * disperser->scale_mass_variance(scaled_mass);
                 avg_mass_variances[j] += scaled_variance;
             }
             assert (disperser->scale_mass_variance(scaled_mass) != 0 || scaled_mass == 0);
